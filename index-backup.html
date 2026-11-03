@@ -1,0 +1,599 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Luxury Super Cars Racing</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{overflow:hidden;background:#10131d;font-family:Arial;color:white}
+canvas{display:block}
+#hud{position:fixed;top:12px;left:12px;z-index:3;font-size:16px;font-weight:bold;line-height:1.8;text-shadow:2px 2px 4px black}
+#energy{width:150px;height:12px;background:#555;border-radius:10px;overflow:hidden}
+#energyFill{width:100%;height:100%;background:#00dfff}
+#overlay{position:fixed;inset:0;z-index:5;background:#07101dcc;display:flex;align-items:center;justify-content:center;overflow:auto;padding:15px}
+.panel{width:min(850px,100%);max-height:95vh;overflow:auto;background:#151d2c;border:1px solid #42516a;border-radius:18px;padding:22px;text-align:center;box-shadow:0 0 35px #000}
+h1{color:#00dfff;margin-bottom:8px}
+.subtitle{color:#bdc9d9;margin-bottom:18px}
+.wallet{font-size:19px;color:#ffd84a;margin:12px}
+.cars{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px;margin:18px 0}
+.car-card{background:#222e40;border:2px solid #46546a;border-radius:12px;padding:14px 8px}
+.car-card.selected{border-color:#00e5ff;box-shadow:0 0 15px #00aaff}
+.car-icon{font-size:44px;margin:8px}
+.car-card h3{font-size:16px;margin:7px 0}
+.car-card p{font-size:13px;color:#ffd84a;margin:7px}
+button{border:0;border-radius:9px;padding:11px 14px;font-weight:bold;cursor:pointer;font-size:14px}
+.action{background:#00dfff;color:#06121b}
+.locked{background:#f0b52c;color:#1d1600}
+button:disabled{background:#667080;color:#ddd;cursor:not-allowed}
+#messageText{margin:10px;color:#c9d4e5;line-height:1.6}
+.controls{position:fixed;bottom:20px;left:0;right:0;display:flex;justify-content:space-between;padding:0 15px;z-index:4;align-items:center}
+.controls button{width:70px;height:60px;background:#ffffffdd;font-size:21px}
+#nitro{width:110px;background:#00dfff;font-size:15px}
+#gameOverPanel{display:none}
+.small{font-size:12px;color:#aab7c8;margin-top:12px}
+@media(max-width:500px){
+ .panel{padding:14px}
+ .cars{grid-template-columns:repeat(2,1fr)}
+ h1{font-size:24px}
+}
+</style>
+</head>
+<body>
+
+<div id="hud" style="display:none">
+ 🏎️ LUXURY RACING<br>
+ 🏆 Score: <span id="score">0</span><br>
+ 🪙 Coins: <span id="coins">0</span><br>
+ 💎 Diamonds: <span id="diamonds">0</span><br>
+ ⚡ Speed: <span id="speed">50</span><br>
+ NITRO ENERGY
+ <div id="energy"><div id="energyFill"></div></div>
+</div>
+
+<div id="overlay">
+ <div class="panel" id="garagePanel">
+  <h1>🏎️ LUXURY CAR GARAGE</h1>
+  <p class="subtitle">Choose your dream racing car!</p>
+  <div class="wallet">🪙 Your Coins: <span id="wallet">0</span></div>
+  <div class="cars" id="carList"></div>
+  <p id="messageText">Select a car to start your race.</p>
+  <button class="action" id="startBtn">🏁 START RACING</button>
+  <p class="small">Collect coins during races to unlock more cars.</p>
+ </div>
+
+ <div class="panel" id="gameOverPanel">
+  <h1>🏁 RACE FINISHED!</h1>
+  <p id="finalStats"></p>
+  <br>
+  <button class="action" id="garageBtn">🚗 BACK TO GARAGE</button>
+ </div>
+</div>
+
+<div class="controls" id="controls" style="display:none">
+ <button id="left">⬅️</button>
+ <button id="nitro">🚀 NITRO</button>
+ <button id="right">➡️</button>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+
+// SCENE
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x87ceeb);
+scene.fog=new THREE.Fog(0x87ceeb,35,120);
+
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,200);
+camera.position.set(0,6,11);
+camera.lookAt(0,0,-5);
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+document.body.appendChild(renderer.domElement);
+
+// LIGHTS
+scene.add(new THREE.HemisphereLight(0xffffff,0x444444,2));
+const sun=new THREE.DirectionalLight(0xffffff,2);
+sun.position.set(-5,12,8);
+sun.castShadow=true;
+scene.add(sun);
+
+// MATERIAL AND BOX
+function box(w,h,d,color){
+ return new THREE.Mesh(new THREE.BoxGeometry(w,h,d),
+  new THREE.MeshStandardMaterial({color,metalness:.35,roughness:.3}));
+}
+
+// ROAD
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(200,200),
+ new THREE.MeshStandardMaterial({color:0x238b36}));
+ground.rotation.x=-Math.PI/2;
+ground.position.y=-.12;
+scene.add(ground);
+
+const road=new THREE.Mesh(new THREE.PlaneGeometry(10,200),
+ new THREE.MeshStandardMaterial({color:0x292929}));
+road.rotation.x=-Math.PI/2;
+scene.add(road);
+
+const lines=[];
+for(let i=0;i<24;i++){
+ const l=box(.12,.03,3,0xffffff);
+ l.position.set(0,.04,-i*6);
+ scene.add(l);
+ lines.push(l);
+}
+
+for(const x of [-4.9,4.9]){
+ const edge=box(.18,.08,200,0xffff00);
+ edge.position.set(x,.04,-90);
+ scene.add(edge);
+}
+
+// FIVE LUXURY CARS
+const carData=[
+ {name:"Red Beast",color:0xff2020,cost:0,icon:"🔴"},
+ {name:"Blue Thunder",color:0x0066ff,cost:100,icon:"🔵"},
+ {name:"Yellow Speed",color:0xffcc00,cost:250,icon:"🟡"},
+ {name:"Black Shadow",color:0x181818,cost:500,icon:"⚫"},
+ {name:"White Phantom",color:0xf0f0f0,cost:1000,icon:"⚪"}
+];
+
+function createCar(color,index=0){
+ const car=new THREE.Group();
+
+ const body=box(1.5,.55,2.6,color);
+ body.position.y=.65;
+ car.add(body);
+
+ const cabin=box(
+  index===2?1.0:1.1,
+  index===4?.75:.65,
+  index===3?1.4:1.25,
+  index===3?0x555555:0x112238
+ );
+ cabin.position.set(0,1.2,-.15);
+ car.add(cabin);
+
+ const glass=box(1.03,.45,.04,0x8adfff);
+ glass.position.set(0,1.25,.49);
+ car.add(glass);
+
+ for(const x of [-.8,.8]){
+  for(const z of [-.8,.8]){
+   const wheel=new THREE.Mesh(
+    new THREE.CylinderGeometry(.34,.34,.22,20),
+    new THREE.MeshStandardMaterial({color:0x111111})
+   );
+   wheel.rotation.z=Math.PI/2;
+   wheel.position.set(x,.35,z);
+   car.add(wheel);
+  }
+ }
+
+ for(const x of [-.5,.5]){
+  const light=box(.3,.18,.08,0xffffcc);
+  light.position.set(x,.7,1.34);
+  car.add(light);
+ }
+
+ // SPORT REAR SPOILER
+ if(index===1||index===3){
+  const spoiler=box(1.6,.09,.22,0x222222);
+  spoiler.position.set(0,1.25,-1.1);
+  car.add(spoiler);
+ }
+
+ return car;
+}
+
+// SAVED GARAGE DATA
+function loadNumber(key,defaultValue){
+ const value=Number(localStorage.getItem(key));
+ return Number.isFinite(value)&&value>=0?value:defaultValue;
+}
+
+let wallet=loadNumber("luxuryCoins",0);
+let unlocked=JSON.parse(localStorage.getItem("luxuryUnlocked")||"[0]");
+if(!Array.isArray(unlocked))unlocked=[0];
+unlocked=unlocked.filter(i=>Number.isInteger(i)&&i>=0&&i<5);
+if(!unlocked.includes(0))unlocked.push(0);
+
+let selected=0;
+let player=null;
+
+// GARAGE MENU
+const carList=document.getElementById("carList");
+const walletText=document.getElementById("wallet");
+const messageText=document.getElementById("messageText");
+
+function saveGarage(){
+ localStorage.setItem("luxuryCoins",String(wallet));
+ localStorage.setItem("luxuryUnlocked",JSON.stringify(unlocked));
+}
+
+function showGarage(){
+ document.getElementById("overlay").style.display="flex";
+ document.getElementById("garagePanel").style.display="block";
+ document.getElementById("gameOverPanel").style.display="none";
+ document.getElementById("hud").style.display="none";
+ document.getElementById("controls").style.display="none";
+ running=false;
+ nitroActive=false;
+ walletText.textContent=wallet;
+ carList.innerHTML="";
+
+ carData.forEach((car,i)=>{
+  const isUnlocked=unlocked.includes(i);
+  const isSelected=selected===i;
+
+  const card=document.createElement("div");
+  card.className="car-card"+(isSelected?" selected":"");
+
+  const icon=document.createElement("div");
+  icon.className="car-icon";
+  icon.textContent=car.icon;
+
+  const name=document.createElement("h3");
+  name.textContent=car.name;
+
+  const price=document.createElement("p");
+  price.textContent=car.cost===0?"FREE":"🪙 "+car.cost+" Coins";
+
+  const btn=document.createElement("button");
+
+  if(isUnlocked){
+   btn.textContent=isSelected?"✓ SELECTED":"SELECT";
+   btn.className="action";
+   btn.onclick=()=>{
+    selected=i;
+    messageText.textContent=car.name+" selected! Ready to race.";
+    showGarage();
+   };
+  }else{
+   btn.textContent="🔒 UNLOCK";
+   btn.className="locked";
+   btn.disabled=wallet<car.cost;
+   btn.onclick=()=>{
+    if(wallet>=car.cost){
+     wallet-=car.cost;
+     unlocked.push(i);
+     selected=i;
+     saveGarage();
+     messageText.textContent=car.name+" unlocked! You can now race.";
+     showGarage();
+    }
+   };
+  }
+
+  card.append(icon,name,price,btn);
+  carList.appendChild(card);
+ });
+
+ // GARAGE PREVIEW CAR
+ if(player)scene.remove(player);
+ player=createCar(carData[selected].color,selected);
+ player.position.set(0,0,4);
+ scene.add(player);
+
+ camera.position.set(0,6,11);
+ camera.lookAt(0,0,0);
+}
+
+document.getElementById("startBtn").onclick=startGame;
+document.getElementById("garageBtn").onclick=showGarage;
+
+// TRAFFIC
+const traffic=[];
+const trafficColors=[0x00aaff,0xffaa00,0x9b59ff,0xffffff];
+
+function createTraffic(){
+ const car=createCar(
+  trafficColors[Math.floor(Math.random()*trafficColors.length)]
+ );
+ const lanes=[-3,0,3];
+ car.position.set(lanes[Math.floor(Math.random()*3)],0,-65);
+ scene.add(car);
+ traffic.push(car);
+}
+
+// COINS AND DIAMONDS
+const collectibles=[];
+
+const goldMaterial=new THREE.MeshStandardMaterial({
+ color:0xffcc00,metalness:.9,roughness:.2,emissive:0x553300
+});
+const diamondMaterial=new THREE.MeshStandardMaterial({
+ color:0x00ddff,metalness:.5,roughness:.15,emissive:0x004466
+});
+
+function createCoin(){
+ const coin=new THREE.Group();
+ const ring=new THREE.Mesh(
+  new THREE.TorusGeometry(.48,.15,12,32),goldMaterial
+ );
+ coin.add(ring);
+ const center=new THREE.Mesh(
+  new THREE.CylinderGeometry(.28,.28,.08,24),goldMaterial
+ );
+ center.rotation.x=Math.PI/2;
+ coin.add(center);
+ return coin;
+}
+
+function createDiamond(){
+ return new THREE.Mesh(
+  new THREE.OctahedronGeometry(.65,0),diamondMaterial
+ );
+}
+
+function spawnCollectible(){
+ const isCoin=Math.random()<.65;
+ const item=isCoin?createCoin():createDiamond();
+ const lanes=[-3,0,3];
+
+ item.position.set(
+  lanes[Math.floor(Math.random()*3)],
+  isCoin?1.1:.9,-75
+ );
+
+ scene.add(item);
+ collectibles.push({
+  object:item,
+  type:isCoin?"coin":"diamond",
+  baseY:item.position.y,
+  phase:Math.random()*Math.PI*2
+ });
+}
+
+// GAME VARIABLES
+let score=0,coins=0,diamonds=0,speed=.5;
+let running=false,spawnTimer=0,itemTimer=0;
+let steering=0,nitroEnergy=100,nitroActive=false;
+
+const scoreText=document.getElementById("score");
+const coinsText=document.getElementById("coins");
+const diamondsText=document.getElementById("diamonds");
+const speedText=document.getElementById("speed");
+const energyFill=document.getElementById("energyFill");
+const nitroButton=document.getElementById("nitro");
+
+function updateHUD(){
+ scoreText.textContent=score;
+ coinsText.textContent=wallet;
+ diamondsText.textContent=diamonds;
+ speedText.textContent=Math.round(speed*100);
+ energyFill.style.width=nitroEnergy+"%";
+}
+
+// KEYBOARD
+const keys={};
+window.addEventListener("keydown",e=>{
+ keys[e.key.toLowerCase()]=true;
+});
+window.addEventListener("keyup",e=>{
+ keys[e.key.toLowerCase()]=false;
+});
+
+// MOBILE CONTROLS
+function holdButton(id,dir){
+ const btn=document.getElementById(id);
+ btn.addEventListener("pointerdown",e=>{
+  e.preventDefault();steering=dir;
+ });
+ function stop(){if(steering===dir)steering=0;}
+ btn.addEventListener("pointerup",stop);
+ btn.addEventListener("pointerleave",stop);
+ btn.addEventListener("pointercancel",stop);
+}
+holdButton("left",-1);
+holdButton("right",1);
+
+// NITRO
+nitroButton.addEventListener("pointerdown",e=>{
+ e.preventDefault();nitroActive=true;
+});
+function stopNitro(){nitroActive=false;}
+nitroButton.addEventListener("pointerup",stopNitro);
+nitroButton.addEventListener("pointerleave",stopNitro);
+nitroButton.addEventListener("pointercancel",stopNitro);
+
+// START RACE
+function startGame(){
+ score=0;
+ coins=0;
+ diamonds=0;
+ speed=.5;
+ spawnTimer=0;
+ itemTimer=0;
+ steering=0;
+ nitroEnergy=100;
+ nitroActive=false;
+
+ traffic.forEach(c=>scene.remove(c));
+ traffic.length=0;
+
+ collectibles.forEach(c=>scene.remove(c.object));
+ collectibles.length=0;
+
+ if(player)scene.remove(player);
+ player=createCar(carData[selected].color,selected);
+ player.position.set(0,0,4);
+ scene.add(player);
+
+ document.getElementById("overlay").style.display="none";
+ document.getElementById("hud").style.display="block";
+ document.getElementById("controls").style.display="flex";
+
+ updateHUD();
+ running=true;
+}
+
+// COLLISIONS
+function collision(a,b){
+ return Math.abs(a.position.x-b.position.x)<1.25 &&
+ Math.abs(a.position.z-b.position.z)<2.2;
+}
+function collectCollision(item){
+ return Math.abs(player.position.x-item.position.x)<1.2 &&
+ Math.abs(player.position.z-item.position.z)<1.8;
+}
+
+// GAME OVER
+function gameOver(){
+ running=false;
+ nitroActive=false;
+ saveGarage();
+
+ document.getElementById("hud").style.display="none";
+ document.getElementById("controls").style.display="none";
+ document.getElementById("overlay").style.display="flex";
+ document.getElementById("garagePanel").style.display="none";
+ document.getElementById("gameOverPanel").style.display="block";
+
+ document.getElementById("finalStats").innerHTML=
+ `🏆 Score: ${score}<br>
+ 🪙 Coins collected this race: ${coins}<br>
+ 💎 Diamonds collected: ${diamonds}<br>
+ 🪙 Total Garage Coins: ${wallet}`;
+}
+
+// ANIMATION
+const clock=new THREE.Clock();
+
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=Math.min(clock.getDelta(),.05);
+
+ if(running){
+  const direction=
+   (keys["arrowright"]||keys["d"]?1:0)-
+   (keys["arrowleft"]||keys["a"]?1:0);
+  const move=direction||steering;
+
+  if(keys["arrowup"]||keys["w"])
+   speed=Math.min(speed+dt*.4,1.5);
+  else if(keys["arrowdown"]||keys["s"])
+   speed=Math.max(speed-dt*.7,.25);
+  else speed=Math.min(speed+dt*.12,1);
+
+  const boosting=nitroActive&&nitroEnergy>0;
+  if(boosting)nitroEnergy=Math.max(0,nitroEnergy-30*dt);
+  else nitroEnergy=Math.min(100,nitroEnergy+10*dt);
+
+  const actualSpeed=speed*(boosting?2:1);
+
+  player.position.x=THREE.MathUtils.clamp(
+   player.position.x+move*dt*7,-3.5,3.5
+  );
+  player.rotation.z=-move*.12;
+
+  // ROAD
+  lines.forEach(l=>{
+   l.position.z+=actualSpeed*35*dt;
+   if(l.position.z>10)l.position.z-=144;
+  });
+
+  // TRAFFIC
+  spawnTimer+=dt;
+  if(spawnTimer>1.5){createTraffic();spawnTimer=0;}
+
+  for(let i=traffic.length-1;i>=0;i--){
+   const car=traffic[i];
+   car.position.z+=actualSpeed*28*dt;
+
+   if(collision(player,car)){
+    gameOver();
+    break;
+   }
+
+   if(car.position.z>12){
+    scene.remove(car);
+    traffic.splice(i,1);
+    score+=10;
+   }
+  }
+
+  if(!running){
+   renderer.render(scene,camera);
+   return;
+  }
+
+  // COLLECTIBLES
+  itemTimer+=dt;
+  if(itemTimer>1.4){
+   spawnCollectible();
+   itemTimer=0;
+  }
+
+  for(let i=collectibles.length-1;i>=0;i--){
+   const item=collectibles[i];
+   item.object.position.z+=actualSpeed*28*dt;
+   item.object.rotation.y+=dt*2;
+   item.object.position.y=
+    item.baseY+Math.sin(clock.elapsedTime*3+item.phase)*.15;
+
+   if(collectCollision(item.object)){
+    if(item.type==="coin"){
+     coins+=10;
+     wallet+=10;
+    }else{
+     diamonds+=1;
+    }
+
+    score+=item.type==="coin"?10:50;
+    saveGarage();
+    scene.remove(item.object);
+    collectibles.splice(i,1);
+    continue;
+   }
+
+   if(item.object.position.z>12){
+    scene.remove(item.object);
+    collectibles.splice(i,1);
+   }
+  }
+
+  updateHUD();
+
+  nitroButton.style.background=boosting?"#ff9d00":"#00dfff";
+  nitroButton.style.boxShadow=boosting?
+   "0 0 30px orange":"0 0 18px #00dfff";
+
+  energyFill.style.background=nitroEnergy<25?"red":"#00dfff";
+ }
+
+ if(!running&&player&&
+  document.getElementById("garagePanel").style.display==="block"){
+  player.rotation.y+=dt*.35;
+ }
+
+ camera.position.x+=
+  (player?player.position.x*.25-camera.position.x:-camera.position.x)*.05;
+
+ camera.lookAt(player?player.position.x*.15:0,0,
+  running?-5:0);
+
+ renderer.render(scene,camera);
+}
+
+// RESIZE
+window.addEventListener("resize",()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+
+showGarage();
+animate();
+</script>
+</body>
+</html>
